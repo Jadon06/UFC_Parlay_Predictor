@@ -1,14 +1,17 @@
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import requests
 
 class DataExtraction:
+    _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
     def __init__(self, char):
         self.data = f'http://ufcstats.com/statistics/fighters?char={char.lower()}&page=all'
         self.char = char.lower()
 
     def get_data(self):
-        page = requests.get(self.data)
+        page = requests.get(self.data, headers=self._HEADERS)
         self.soup = BeautifulSoup(page.text, 'html.parser')
         self.row_data = self.soup.find_all("tr")
 
@@ -77,7 +80,7 @@ class DataExtraction:
     
     def get_fighter_info(self):
         url = self.link[0]
-        page = requests.get(url)
+        page = requests.get(url, headers=self._HEADERS)
         soup = BeautifulSoup(page.text, 'html.parser')
         row_data = soup.find_all("tr")
 
@@ -164,7 +167,7 @@ class DataExtraction:
     def get_career_stats(self, url=None):
         if url is None:
             url = self.link[0]
-        page = requests.get(url)
+        page = requests.get(url, headers=self._HEADERS)
         soup = BeautifulSoup(page.text, 'html.parser')
         li_data = soup.find_all("li", class_='b-list__box-list-item b-list__box-list-item_type_block')
         career_stats = []
@@ -182,19 +185,46 @@ class DataExtraction:
                 values[i] = int(values[i][:-1])/100
         return dict(zip(keys, values))
 
+    def _get_ctrl_times(self, fight_url):
+        try:
+            page = requests.get(fight_url, headers=self._HEADERS, timeout=10)
+            soup = BeautifulSoup(page.text, 'html.parser')
+            for table in soup.find_all("table"):
+                ths = [th.get_text(strip=True) for th in table.find_all("th")]
+                if "Ctrl" not in ths:
+                    continue
+                ctrl_idx = ths.index("Ctrl")
+                data_rows = [r for r in table.find_all("tr") if r.find("td")]
+                if not data_rows:
+                    continue
+                tds = data_rows[0].find_all("td")
+                if ctrl_idx >= len(tds):
+                    continue
+                ps = [p.get_text(strip=True) for p in tds[ctrl_idx].find_all("p")]
+                return (ps[0] if ps else "0:00", ps[1] if len(ps) > 1 else "0:00")
+        except Exception:
+            pass
+        return "0:00", "0:00"
+
     def get_fight_history(self, url, fighter_name):
-        page = requests.get(url)
+        page = requests.get(url, headers=self._HEADERS)
         soup = BeautifulSoup(page.text, 'html.parser')
 
         headers = [th.text.strip() for th in soup.find_all("th")]
         if not headers:
             return pd.DataFrame()
         headers.append("Date")
+        headers.append("f_ctrl")
+        headers.append("o_ctrl")
 
         event_idx = headers.index("Event") if "Event" in headers else None
 
-        rows = []
-        for tr in soup.find_all("tr"):
+        raw_rows = []
+        fight_urls = []
+        for tr in soup.find_all(
+            "tr",
+            class_="b-fight-details__table-row b-fight-details__table-row__hover js-fight-details-click"
+        ):
             cells = tr.find_all("td")
             if not cells:
                 continue
@@ -205,6 +235,22 @@ class DataExtraction:
                 if len(p_tags) >= 2:
                     date = p_tags[1].get_text(strip=True)
             row.append(date)
+            raw_rows.append(row)
+            fight_urls.append(tr.get("data-link", ""))
+
+        if not raw_rows:
+            return pd.DataFrame()
+
+        def fetch_ctrl(u):
+            return self._get_ctrl_times(u) if u else ("0:00", "0:00")
+
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            ctrl_results = list(ex.map(fetch_ctrl, fight_urls))
+
+        rows = []
+        for row, (f_ctrl, o_ctrl) in zip(raw_rows, ctrl_results):
+            row.append(f_ctrl)
+            row.append(o_ctrl)
             if len(row) == len(headers) and any(v.strip() for v in row):
                 rows.append(row)
 
@@ -216,16 +262,18 @@ class DataExtraction:
         return df
 
     def collect_all_fight_histories(self):
-        all_dfs = []
-        for i, url in enumerate(self.urls):
+        def fetch_one(i):
             try:
                 row = self.dataframe.iloc[i]
                 fighter_name = f"{row['First']} {row['Last']}".strip()
-                df = self.get_fight_history(url, fighter_name)
-                if not df.empty:
-                    all_dfs.append(df)
+                return self.get_fight_history(self.urls[i], fighter_name)
             except Exception:
-                pass
+                return pd.DataFrame()
+
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            results = list(ex.map(fetch_one, range(len(self.urls))))
+
+        all_dfs = [df for df in results if not df.empty]
         if all_dfs:
             combined = pd.concat(all_dfs, ignore_index=True)
             dedup_cols = [c for c in ["Fighter", "Event", "Date"] if c in combined.columns]
@@ -234,6 +282,16 @@ class DataExtraction:
             self.compute_prefight_stats()
         else:
             self.fight_history_df = pd.DataFrame()
+
+    def _map_method(self, method_str):
+        m = str(method_str).strip().upper()
+        if "DECISION" in m or m in ("U-DEC", "S-DEC", "M-DEC"):
+            return "DEC"
+        if "KO" in m or "TKO" in m:
+            return "KO/TKO"
+        if "SUBMISSION" in m or "SUB" in m:
+            return "SUB"
+        return "other"
 
     def clean_fight_history(self):
         df = self.fight_history_df
@@ -252,6 +310,18 @@ class DataExtraction:
             else (row["Opponent"] if row["W/L"].strip().lower() in ("l", "loss") else "Draw"),
             axis=1
         )
+
+        df["method"] = df["Method"].apply(self._map_method)
+
+        def _ctrl_to_seconds(val):
+            try:
+                parts = str(val).strip().split(":")
+                return int(parts[0]) * 60 + int(parts[1])
+            except Exception:
+                return 0.0
+
+        df["f_ctrl"] = df["f_ctrl"].apply(_ctrl_to_seconds)
+        df["o_ctrl"] = df["o_ctrl"].apply(_ctrl_to_seconds)
 
         for col in ["Str_fighter", "Str_opponent", "Td_fighter", "Td_opponent", "Round"]:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -273,12 +343,12 @@ class DataExtraction:
 
         # Build full history from both perspectives so each fighter's record is complete
         forward = df[["Fighter", "W/L", "Str_fighter", "Str_opponent",
-                       "Td_fighter", "Method", "fight_minutes", "Date"]].copy()
-        forward.columns = ["name", "wl", "str_landed", "str_absorbed", "td", "method", "minutes", "date"]
+                       "Td_fighter", "Method", "fight_minutes", "f_ctrl", "Date"]].copy()
+        forward.columns = ["name", "wl", "str_landed", "str_absorbed", "td", "method", "minutes", "ctrl", "date"]
 
         backward = df[["Opponent", "W/L", "Str_opponent", "Str_fighter",
-                        "Td_opponent", "Method", "fight_minutes", "Date"]].copy()
-        backward.columns = ["name", "wl", "str_landed", "str_absorbed", "td", "method", "minutes", "date"]
+                        "Td_opponent", "Method", "fight_minutes", "o_ctrl", "Date"]].copy()
+        backward.columns = ["name", "wl", "str_landed", "str_absorbed", "td", "method", "minutes", "ctrl", "date"]
         backward["wl"] = backward["wl"].apply(
             lambda x: "L" if str(x).strip().lower() in ("w", "win")
             else ("W" if str(x).strip().lower() in ("l", "loss") else "D")
@@ -290,7 +360,7 @@ class DataExtraction:
             prior = full_history[(full_history["name"] == name) & (full_history["date"] < before_date)]
             n = len(prior)
             if n == 0:
-                return {k: 0.0 for k in ["SLpM", "SApM", "TD_pct", "W_pct", "KO_pct", "Sub_pct", "Finish_pct"]}
+                return {k: 0.0 for k in ["SLpM", "SApM", "TD_pct", "W_pct", "KO_pct", "Sub_pct", "Finish_pct", "ctrl"]}
             total_min = prior["minutes"].sum() or 1
             wins = prior[prior["wl"].str.strip().str.lower().isin(["w", "win"])]
             n_wins = len(wins)
@@ -307,6 +377,7 @@ class DataExtraction:
                 "KO_pct":      round(ko_wins / max(n_wins, 1), 3),
                 "Sub_pct":     round(sub_wins / max(n_wins, 1), 3),
                 "Finish_pct":  round(finishes / n, 3),
+                "ctrl":        round(prior["ctrl"].mean(), 3),
             }
 
         fighter_stats = df.apply(lambda row: stats_for(row["Fighter"], row["Date"]), axis=1)
@@ -315,11 +386,12 @@ class DataExtraction:
         f_df = pd.DataFrame(fighter_stats.tolist()).add_prefix("f_")
         o_df = pd.DataFrame(opponent_stats.tolist()).add_prefix("o_")
 
-        keep = ["W/L", "winner", "Date", "Fighter", "Opponent"]
+        keep = ["W/L", "winner", "method", "Round", "Date", "Fighter", "Opponent"]
         self.fight_history_df = pd.concat(
             [df[keep].reset_index(drop=True), f_df, o_df], axis=1
         )
         self._compute_elo(df)
+        self._compute_survivor_score(df)
 
     def _compute_elo(self, df):
         import math
@@ -362,6 +434,52 @@ class DataExtraction:
         elo_cols = df_sorted[["f_ELO", "o_ELO"]]
         self.fight_history_df = pd.concat(
             [self.fight_history_df.reset_index(drop=True), elo_cols.reset_index(drop=True)], axis=1
+        )
+
+    def _compute_survivor_score(self, df):
+        KO_TKO_MULT = {1: 1.8, 2: 1.3, 3: 1.0, 4: 0.7, 5: 0.2}
+        SUB_MULT    = {1: 1.2, 2: 1.2, 3: 0.8, 4: 0.5, 5: 0.1}
+
+        df_sorted = df.sort_values("Date").reset_index(drop=True)
+        scores = {}
+        f_scores = [0.0] * len(df_sorted)
+        o_scores = [0.0] * len(df_sorted)
+
+        for i, row in df_sorted.iterrows():
+            fighter  = row["Fighter"]
+            opponent = row["Opponent"]
+            method   = row["method"]
+            winner   = row["winner"]
+            rnd      = max(1, min(5, int(row["Round"]) if pd.notna(row["Round"]) else 3))
+
+            f_score = scores.get(fighter,  1000.0)
+            o_score = scores.get(opponent, 1000.0)
+            f_scores[i] = f_score
+            o_scores[i] = o_score
+
+            win_name = winner if winner in (fighter, opponent) else None
+            loser    = opponent if win_name == fighter else (fighter if win_name == opponent else None)
+
+            if method == "KO/TKO":
+                if win_name:
+                    scores[win_name] = scores.get(win_name, 1000.0) + rnd * 10
+                if loser:
+                    scores[loser] = scores.get(loser, 1000.0) - 100 * KO_TKO_MULT.get(rnd, 1.0)
+            elif method == "SUB":
+                if win_name:
+                    scores[win_name] = scores.get(win_name, 1000.0) + rnd * 10
+                if loser:
+                    scores[loser] = scores.get(loser, 1000.0) - 100 * SUB_MULT.get(rnd, 1.0)
+            elif method == "DEC":
+                scores[fighter]  = scores.get(fighter,  1000.0) + 100
+                scores[opponent] = scores.get(opponent, 1000.0) + 100
+
+        df_sorted["f_survivor_score"] = f_scores
+        df_sorted["o_survivor_score"] = o_scores
+
+        surv_cols = df_sorted[["f_survivor_score", "o_survivor_score"]]
+        self.fight_history_df = pd.concat(
+            [self.fight_history_df.reset_index(drop=True), surv_cols.reset_index(drop=True)], axis=1
         )
 
     def run_all(self):
