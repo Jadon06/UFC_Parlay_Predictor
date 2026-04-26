@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from agent import encode_image, extract_parlay
 from predictions import get_fighters
@@ -123,6 +123,8 @@ async def predict(image: UploadFile = File(...)):
         tmp_path = tmp.name
     try:
         extracted_parlay = extract_parlay(tmp_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.unlink(tmp_path)
     fighters = get_fighters(extracted_parlay)

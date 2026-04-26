@@ -232,7 +232,7 @@ export default function App() {
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#111111' }}>
-                  {['PNG', 'JPG', 'WEBP'].map(fmt => (
+                  {['JPG', 'PNG', 'GIF', 'WEBP'].map(fmt => (
                     <span key={fmt} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span style={{ color: '#22c55e' }}>✓</span> {fmt}
                     </span>
@@ -244,7 +244,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" accept="image/*" capture={undefined} style={{ display: 'none' }} onChange={handleFileChange} />
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture={undefined} style={{ display: 'none' }} onChange={handleFileChange} />
             </div>
           )}
 
