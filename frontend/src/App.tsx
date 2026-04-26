@@ -4,8 +4,19 @@ import './index.css'
 
 type AppState = 'idle' | 'loading' | 'result' | 'error'
 
+type ParlayLeg = {
+  fighter1: string
+  fighter2: string
+  bet: string
+}
 
-async function fetchPrediction(file: File): Promise<number> {
+type PredictionResult = {
+  probability: number
+  weakest_leg: ParlayLeg
+  strongest_leg: ParlayLeg
+}
+
+async function fetchPrediction(file: File): Promise<PredictionResult> {
   const formData = new FormData()
   formData.append('image', file)
 
@@ -16,8 +27,7 @@ async function fetchPrediction(file: File): Promise<number> {
 
   if (!response.ok) throw new Error(`Server error: ${response.status}`)
 
-  const data = await response.json()
-  return data.probability as number
+  return response.json() as Promise<PredictionResult>
 }
 
 function getProbabilityColor(prob: number): string {
@@ -36,7 +46,7 @@ function getProbabilityLabel(prob: number): string {
 
 export default function App() {
   const [state, setState] = useState<AppState>('idle')
-  const [probability, setProbability] = useState<number | null>(null)
+  const [result, setResult] = useState<PredictionResult | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -52,8 +62,8 @@ export default function App() {
     setState('loading')
     setErrorMsg('')
     try {
-      const prob = await fetchPrediction(file)
-      setProbability(prob)
+      const data = await fetchPrediction(file)
+      setResult(data)
       setState('result')
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Something went wrong.')
@@ -80,7 +90,7 @@ export default function App() {
 
   const reset = () => {
     setState('idle')
-    setProbability(null)
+    setResult(null)
     setPreview(null)
     setErrorMsg('')
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -261,44 +271,70 @@ export default function App() {
             </div>
           )}
 
-          {state === 'result' && probability !== null && (
+          {state === 'result' && result !== null && (
             <div style={{ borderRadius: '16px', border: '1px solid #111111', backgroundColor: 'transparent', overflow: 'hidden' }}>
               {preview && (
                 <div style={{ position: 'relative', height: '100px', overflow: 'hidden' }}>
                   <img src={preview} alt="parlay" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.15 }} />
-                  <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, transparent)' }} />
                 </div>
               )}
               <div className="result-padding" style={{ textAlign: 'center' }}>
+                {/* Probability */}
                 <p style={{ color: '#111111', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.15em', margin: '0 0 12px' }}>Parlay Win Probability</p>
                 <div className="animate-count-up">
-                  <span className="prob-size" style={{ fontWeight: 900, lineHeight: 1, color: getProbabilityColor(probability) }}>
-                    {Math.round(probability * 100)}%
+                  <span className="prob-size" style={{ fontWeight: 900, lineHeight: 1, color: getProbabilityColor(result.probability) }}>
+                    {Math.round(result.probability * 100)}%
                   </span>
                 </div>
                 <div style={{
                   display: 'inline-block', marginTop: '16px', padding: '6px 20px', borderRadius: '999px', fontSize: '13px', fontWeight: 700, letterSpacing: '0.05em',
-                  color: getProbabilityColor(probability),
-                  border: `1px solid ${getProbabilityColor(probability)}44`,
-                  backgroundColor: `${getProbabilityColor(probability)}11`,
+                  color: getProbabilityColor(result.probability),
+                  border: `1px solid ${getProbabilityColor(result.probability)}44`,
+                  backgroundColor: `${getProbabilityColor(result.probability)}11`,
                 }}>
-                  {getProbabilityLabel(probability)}
+                  {getProbabilityLabel(result.probability)}
                 </div>
 
                 {/* Progress bar */}
-                <div style={{ marginTop: '28px', width: '100%', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
+                <div style={{ marginTop: '24px', width: '100%', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: '999px',
-                    width: `${Math.round(probability * 100)}%`,
+                    width: `${Math.round(result.probability * 100)}%`,
                     background: `linear-gradient(90deg, #d20a0a 0%, #b91c1c 20%, #166534 30%, #15803d 50%, #16a34a 70%, #22c55e 85%, #4ade80 100%)`,
                     transition: 'width 1s ease',
                   }} />
                 </div>
 
+                {/* Leg breakdown */}
+                <div style={{ marginTop: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', textAlign: 'left' }}>
+                  {([
+                    { label: 'Strongest Leg', leg: result.strongest_leg, accent: '#22c55e' },
+                    { label: 'Weakest Leg',   leg: result.weakest_leg,   accent: '#d20a0a' },
+                  ] as const).map(({ label, leg, accent }) => (
+                    <div key={label} style={{
+                      borderRadius: '10px',
+                      border: `1px solid ${accent}44`,
+                      backgroundColor: `${accent}0d`,
+                      padding: '12px',
+                    }}>
+                      <p style={{ color: accent, fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', margin: '0 0 8px', fontWeight: 700 }}>{label}</p>
+                      <p style={{ color: '#111111', fontSize: '13px', fontWeight: 700, margin: '0 0 2px', lineHeight: 1.3 }}>{leg.fighter1}</p>
+                      {leg.fighter2 && leg.fighter2 !== 'NA' && (
+                        <p style={{ color: '#555555', fontSize: '11px', margin: '0 0 8px' }}>vs {leg.fighter2}</p>
+                      )}
+                      <span style={{
+                        display: 'inline-block', marginTop: leg.fighter2 && leg.fighter2 !== 'NA' ? 0 : '8px',
+                        padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600,
+                        color: accent, border: `1px solid ${accent}44`, backgroundColor: `${accent}11`,
+                      }}>{leg.bet}</span>
+                    </div>
+                  ))}
+                </div>
+
                 <button
                   onClick={reset}
                   style={{
-                    marginTop: '28px', width: '100%', padding: '12px', borderRadius: '10px',
+                    marginTop: '24px', width: '100%', padding: '12px', borderRadius: '10px',
                     border: '1px solid #111111', backgroundColor: 'transparent', color: '#111111',
                     fontSize: '14px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s ease',
                   }}

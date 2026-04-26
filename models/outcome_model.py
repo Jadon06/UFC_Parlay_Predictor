@@ -105,3 +105,4 @@ print("Log Loss:", log_loss(y_test, probs)) # Log Loss: 0.7668990628648714
 
 joblib.dump(model, "trained_models/ufc_outcome_model.pkl")
 joblib.dump(X_train.columns.tolist(), "features/ufc_outcomes_features.pkl")
+joblib.dump(le, "label_encoder.pkl")

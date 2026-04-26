@@ -8,56 +8,19 @@ import requests
 class FighterInfo:
     _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    def __init__(self, fighter):
-        self.fighter = fighter
-        self.data = f'http://ufcstats.com/statistics/fighters?char={fighter.split(" ", 1)[1][0].lower()}&page=all'
+    def __init__(self, fighter1, fighter2):
+        self.fighter1 = fighter1
+        self.fighter2 = fighter2
 
-    def get_data(self):
-        page = requests.get(self.data, headers=self._HEADERS)
-        self.soup = BeautifulSoup(page.text, 'html.parser')
-        self.row_data = self.soup.find_all("tr")
-
-    def get_headers(self):
-        self.table_headers = []
-        for header in self.soup.find_all("th"):
-            self.table_headers.append(header.text.strip())
-
-    def set_dataframe(self):
-        self.dataframe = pd.DataFrame(columns=self.table_headers)
-        return self.dataframe
-
-    def get_urls(self):
-        self.urls = []
-        for row in self.row_data:
-            cell_data = row.find_all("td")
-            length = len(self.dataframe)
-            row_info = [data.text.strip() for data in cell_data]
-            try:
-                self.dataframe.loc[length] = row_info
-            except ValueError:
-                pass
-            for tag in cell_data:
-                reference_url = tag.find('a')
-                if reference_url:
-                    self.urls.append(reference_url['href'])
-        self.urls = [link for i, link in enumerate(self.urls) if link not in self.urls[:i]]
-        self.urls = [sublist for sublist in self.urls if sublist]
-
-    def set_dataframe_urls(self):
-        self.dataframe['UFC Link'] = self.urls
-        return self.dataframe
-
-    def find_fighter(self):
-        fighter_split_name = self.fighter.split(" ")
-        fighter_firstname = fighter_split_name[0]
-        fighter_lastname = " ".join(fighter_split_name[1:])
-        mask = (
-            (self.dataframe['First'] == fighter_firstname) &
-            (self.dataframe['Last'] == fighter_lastname)
-        )
-        index = self.dataframe.index[mask]
-        self.link = list(self.dataframe.loc[index, 'UFC Link'])
-        return self.dataframe.iloc[index]
+    def _map_method(self, method_str):
+        m = str(method_str).strip().upper()
+        if "DECISION" in m or m in ("U-DEC", "S-DEC", "M-DEC"):
+            return "DEC"
+        if "KO" in m or "TKO" in m:
+            return "KO/TKO"
+        if "SUBMISSION" in m or "SUB" in m:
+            return "SUB"
+        return "other"
 
     def _get_ctrl_times(self, fight_url):
         try:
@@ -80,28 +43,45 @@ class FighterInfo:
             pass
         return "0:00", "0:00"
 
-    def _map_method(self, method_str):
-        m = str(method_str).strip().upper()
-        if "DECISION" in m or m in ("U-DEC", "S-DEC", "M-DEC"):
-            return "DEC"
-        if "KO" in m or "TKO" in m:
-            return "KO/TKO"
-        if "SUBMISSION" in m or "SUB" in m:
-            return "SUB"
-        return "other"
+    def _find_fighter_url(self, fighter_name):
+        data_url = f'http://ufcstats.com/statistics/fighters?char={fighter_name.split(" ", 1)[1][0].lower()}&page=all'
+        page = requests.get(data_url, headers=self._HEADERS)
+        soup = BeautifulSoup(page.text, 'html.parser')
+        row_data = soup.find_all("tr")
 
-    def get_fight_history(self):
-        url = self.link[0]
-        page = requests.get(url, headers=self._HEADERS)
+        table_headers = [th.text.strip() for th in soup.find_all("th")]
+        dataframe = pd.DataFrame(columns=table_headers)
+
+        urls = []
+        for row in row_data:
+            cell_data = row.find_all("td")
+            row_info = [data.text.strip() for data in cell_data]
+            try:
+                dataframe.loc[len(dataframe)] = row_info
+            except ValueError:
+                pass
+            for tag in cell_data:
+                ref = tag.find('a')
+                if ref:
+                    urls.append(ref['href'])
+        urls = [link for i, link in enumerate(urls) if link not in urls[:i]]
+        urls = [u for u in urls if u]
+        dataframe['UFC Link'] = urls
+
+        parts = fighter_name.split(" ")
+        mask = (dataframe['First'] == parts[0]) & (dataframe['Last'] == " ".join(parts[1:]))
+        index = dataframe.index[mask]
+        links = list(dataframe.loc[index, 'UFC Link'])
+        return links[0] if links else None
+
+    def _scrape_fight_history(self, fighter_url):
+        page = requests.get(fighter_url, headers=self._HEADERS)
         soup = BeautifulSoup(page.text, 'html.parser')
 
         headers = [th.text.strip() for th in soup.find_all("th")]
         if not headers:
-            self.fight_history_df = pd.DataFrame()
-            return
-        headers.append("Date")
-        headers.append("f_ctrl")
-        headers.append("o_ctrl")
+            return pd.DataFrame()
+        headers += ["Date", "f_ctrl", "o_ctrl"]
 
         event_idx = headers.index("Event") if "Event" in headers else None
 
@@ -125,8 +105,7 @@ class FighterInfo:
             fight_urls.append(tr.get("data-link", ""))
 
         if not raw_rows:
-            self.fight_history_df = pd.DataFrame()
-            return
+            return pd.DataFrame()
 
         def fetch_ctrl(u):
             return self._get_ctrl_times(u) if u else ("0:00", "0:00")
@@ -136,15 +115,13 @@ class FighterInfo:
 
         rows = []
         for row, (f_ctrl, o_ctrl) in zip(raw_rows, ctrl_results):
-            row.append(f_ctrl)
-            row.append(o_ctrl)
+            row += [f_ctrl, o_ctrl]
             if len(row) == len(headers) and any(v.strip() for v in row):
                 rows.append(row)
 
-        self.fight_history_df = pd.DataFrame(rows, columns=headers) if rows else pd.DataFrame()
+        return pd.DataFrame(rows, columns=headers) if rows else pd.DataFrame()
 
-    def compute_current_stats(self):
-        df = self.fight_history_df.copy()
+    def _compute_stats_from_history(self, df):
         if df.empty:
             return {}
 
@@ -152,11 +129,11 @@ class FighterInfo:
         df[["Str_fighter", "Str_opponent"]] = df["Str"].astype(str).str.split(" ", expand=True)
 
         split_names = df["Fighter"].astype(str).str.split(" ", expand=True)
-        df["Fighter"] = split_names.loc[:, 0:1].apply(lambda row: " ".join(row.dropna()), axis=1)
-        df["Opponent"] = split_names.loc[:, 2:].apply(lambda row: " ".join(row.dropna()), axis=1)
+        df["Fighter"]  = split_names.loc[:, 0:1].apply(lambda r: " ".join(r.dropna()), axis=1)
+        df["Opponent"] = split_names.loc[:, 2:].apply(lambda r: " ".join(r.dropna()), axis=1)
 
         df["method"] = df["Method"].apply(self._map_method)
-        df["is_win"] = df["W/L"].str.strip().str.lower().isin(["w", "win"])
+        df["is_win"]  = df["W/L"].str.strip().str.lower().isin(["w", "win"])
 
         for col in ["Str_fighter", "Str_opponent", "Td_fighter", "Round"]:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -182,32 +159,31 @@ class FighterInfo:
 
         df["fight_minutes"] = df.apply(parse_minutes, axis=1)
 
-        n = len(df)
+        n         = len(df)
         total_min = df["fight_minutes"].sum() or 1
-        wins = df[df["is_win"]]
-        n_wins = len(wins)
-        last5 = df.tail(5)
-        n_last5_wins = last5["is_win"].sum()
-        ko_wins = wins["method"].str.contains("KO/TKO", case=False, na=False).sum()
-        sub_wins = wins["method"].str.contains("SUB", case=False, na=False).sum()
-        finishes = (~df["method"].str.contains("DEC", case=False, na=False)).sum()
+        wins      = df[df["is_win"]]
+        n_wins    = len(wins)
+        last5     = df.tail(5)
+        ko_wins   = wins["method"].str.contains("KO/TKO", case=False, na=False).sum()
+        sub_wins  = wins["method"].str.contains("SUB",    case=False, na=False).sum()
+        finishes  = (~df["method"].str.contains("DEC",   case=False, na=False)).sum()
 
         stats = {
             "SLpM":       round(df["Str_fighter"].sum() / total_min, 3),
             "SApM":       round(df["Str_opponent"].sum() / total_min, 3),
             "TD_pct":     round(df["Td_fighter"].sum() / n, 3),
-            "W_pct":      round(n_last5_wins / len(last5), 3),
-            "KO_pct":     round(ko_wins / max(n_wins, 1), 3),
+            "W_pct":      round(last5["is_win"].sum() / len(last5), 3),
+            "KO_pct":     round(ko_wins  / max(n_wins, 1), 3),
             "Sub_pct":    round(sub_wins / max(n_wins, 1), 3),
             "Finish_pct": round(finishes / n, 3),
             "ctrl":       round(df["ctrl_sec"].mean(), 3),
         }
 
-        # ELO — opponent assumed 1000 each fight since we only have this fighter's history
+        # ELO — opponent assumed 1000 each fight (only this fighter's history available)
         elo = 1000.0
         for _, row in df.iterrows():
             opp_elo = 1000.0
-            diff = abs(elo - opp_elo)
+            diff    = abs(elo - opp_elo)
             if diff == 0:
                 change = elo * 0.008
             elif diff <= 30:
@@ -225,7 +201,7 @@ class FighterInfo:
         survivor = 1000.0
         for _, row in df.iterrows():
             method = row["method"]
-            rnd = max(1, min(5, int(row["Round"]) if pd.notna(row["Round"]) else 3))
+            rnd    = max(1, min(5, int(row["Round"]) if pd.notna(row["Round"]) else 3))
             if method == "KO/TKO":
                 survivor += rnd * 10 if row["is_win"] else -100 * KO_TKO_MULT.get(rnd, 1.0)
             elif method == "SUB":
@@ -236,12 +212,22 @@ class FighterInfo:
 
         return stats
 
-    def get_current_stats(self):
-        self.get_data()
-        self.get_headers()
-        self.set_dataframe()
-        self.get_urls()
-        self.set_dataframe_urls()
-        self.find_fighter()
-        self.get_fight_history()
-        return self.compute_current_stats()
+    def _get_fighter_stats(self, fighter_name):
+        url = self._find_fighter_url(fighter_name)
+        if not url:
+            return {}
+        df = self._scrape_fight_history(url)
+        return self._compute_stats_from_history(df)
+
+    def get_prediction_row(self):
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f1_future = ex.submit(self._get_fighter_stats, self.fighter1)
+            f2_future = ex.submit(self._get_fighter_stats, self.fighter2)
+            f1_stats  = f1_future.result()
+            f2_stats  = f2_future.result()
+
+        row = {"Fighter": self.fighter1, "Opponent": self.fighter2}
+        row.update({f"f_{k}": v for k, v in f1_stats.items()})
+        row.update({f"o_{k}": v for k, v in f2_stats.items()})
+
+        return pd.DataFrame([row])

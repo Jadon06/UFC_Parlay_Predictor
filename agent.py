@@ -1,10 +1,10 @@
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 import base64
+import os
 from pydantic import BaseModel
 
 class ParlayLeg(BaseModel):
-    betting_odds: str
     fighter1: str
     fighter2: str
     bet: str
@@ -12,8 +12,11 @@ class ParlayLeg(BaseModel):
 class ParlayResult(BaseModel):
     legs: list[ParlayLeg]
 
+_ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
 ocr_model = ChatOllama(
     model="llama3.2-vision",
+    base_url=_ollama_host,
     temperature=0,
     max_tokens=2000,
     timeout=30,
@@ -21,6 +24,7 @@ ocr_model = ChatOllama(
 
 model = ChatOllama(
     model="llama3.2-vision",
+    base_url=_ollama_host,
     temperature=0,
     max_tokens=1000,
     timeout=30,
@@ -50,8 +54,8 @@ If you see a subtext line with "v" or "vs" between two names, that is the full m
 Example output format:
 {
   "legs": [
-    {"betting_odds": "-188", "fighter1": "Bryan Battle", "fighter2": "NA", "bet": "Moneyline"},
-    {"betting_odds": "-334", "fighter1": "Marina Rodriguez", "fighter2": "NA", "bet": "Moneyline"}
+    {"fighter1": "Bryan Battle", "fighter2": "NA", "bet": "Moneyline"},
+    {"fighter1": "Marina Rodriguez", "fighter2": "Jessica Andrade", "bet": "Moneyline"}
   ]
 }
 
@@ -60,6 +64,7 @@ Rules:
 - ONLY extract text that is explicitly visible in the image. Do NOT guess, infer, or hallucinate any names or values.
 - If a fighter name or any field is not clearly visible in the image, use "NA". It is better to use "NA" than to guess.
 - Many parlay legs show only one fighter — if fighter2 is not explicitly written in the image, use "NA".
+- Ignore betting odds entirely. Always set "betting_odds" to "NA".
 - Do not include any text before or after the JSON object.
 """
 
@@ -74,7 +79,7 @@ def extract_parlay(image_path):
     # Step 1: read every line of text from the image
     ocr_response = ocr_model.invoke([
         HumanMessage(content=[
-            {"type": "text", "text": "Read every single line of text visible in this image exactly as written. Do not skip any text, including small or faint text."},
+            {"type": "text", "text": "Read every single line of text visible in this image exactly as written. Do not skip any text, including small or faint text. Pay special attention to small subtext lines that appear below bet type labels — these often contain the full matchup in the format 'Fighter A v Fighter B' or 'Fighter A vs Fighter B' and must be included."},
             image_content
         ])
     ])
@@ -86,8 +91,8 @@ def extract_parlay(image_path):
     ])
     return response
 
-test = extract_parlay(r"C:\Users\aycja\UFC ML project\parlayscreenshot_test.png")
-print(test)
+# test = extract_parlay(r"C:\Users\aycja\git repos\UFC_Parlay_Predictor\parlayscreenshot_test.png")
+# print(test)
 # Usage: pass a local image path
 # result = extract_parlay("screenshot.jpg")
 # print(result)
