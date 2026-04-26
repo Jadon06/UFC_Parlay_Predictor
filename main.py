@@ -51,7 +51,7 @@ system_prompt = """ You are an agent tasked with deciding which machine learning
                 Return your choice for each leg of the parlay in a list.
                 """
 
-def load_model(model: str):
+def load_models():
     features = {
         "ufc_outcome_model.pkl" : "ufc_outcome_features.pkl",
         "ufc_round_prediction_model.pkl" : "ufc_round_predictions_features.pkl",
@@ -60,11 +60,13 @@ def load_model(model: str):
     model = joblib.load(model)
     features = joblib.load(features[model])
 
-    if model == "ufc_outcome_model.pkl":
-        le = joblib.load("label_encoder.pkl")
-        return model, features, le
-
-    return model, features
+    models = []
+    for model, feature in features:
+        models.append((model, feature))
+        if model == "ufc_outcome_model.pkl":
+            le = joblib.load("label_encoder.pkl")
+            models.append((model, feature, le))
+    return models
 
 """
 probabilities translation:
@@ -91,32 +93,18 @@ async def predict(image: UploadFile = File(...)):
         os.unlink(tmp_path)
     fighters = get_fighters(extracted_parlay)
 
+    models = load_models()
+
     # choose and load models
     response = model.invoke([
         SystemMessage(content=system_prompt),
-        HumanMessage(content="Choose the predictive models based on the extracted parlay")
+        HumanMessage(content="Choose the predictive models based on the extracted parlay, models have been loaded as a list of tuples in this format (model, feature, le) 'le' only exists for ufc_outcome_model.pkl")
     ])
 
     to_predict = dict(zip(response, fighters))
 
     probabilities = []
-    for model, fighters in to_predict:
-        if model == "ufc_outcome_model.pkl":
-            loaded_model, features, le = load_model(model)
-            new_fight = FighterInfo(fighters[0], fighters[1])[features]
-            probs = loaded_model.predict_proba(new_fight)
-            probabilities.append(le.classes_[np.argmax(probs)])
-
-        if model == "ufc_WL_model.pkl":
-            loaded_model, features = load_model(model)
-            new_fight = FighterInfo(fighters[0], fighters[1])[features]
-            probs = loaded_model.predict_proba(new_fight)
-            probabilities.append(probs[0])
-
-        loaded_model, features = load_model(model)
-        new_fight = FighterInfo(fighters[0], fighters[1])[features]
-        prob = loaded_model.predict_proba(new_fight)
-        probabilities.append(prob[2])
+    
 
     legs_probs = dict(zip(probabilities, extracted_parlay))
     probability = math.prod(probabilities)
