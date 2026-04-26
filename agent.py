@@ -1,6 +1,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 import base64
+import os
 from pydantic import BaseModel
 from typing import Optional
 
@@ -81,9 +82,13 @@ def encode_image(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode('utf-8')
 
+_MEDIA_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
+
 def extract_parlay(image_path):
     base64_image = encode_image(image_path)
-    image_content = {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+    ext = os.path.splitext(image_path)[1].lower()
+    media_type = _MEDIA_TYPES.get(ext, "image/jpeg")
+    image_content = {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{base64_image}"}}
 
     # Step 1: read every line of text from the image
     ocr_response = ocr_model.invoke([
