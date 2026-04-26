@@ -1,7 +1,6 @@
-from langchain_ollama import ChatOllama
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 import base64
-import os
 from pydantic import BaseModel
 from typing import Optional
 
@@ -15,22 +14,16 @@ class ParlayLeg(BaseModel):
 class ParlayResult(BaseModel):
     legs: list[ParlayLeg]
 
-_ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-
-ocr_model = ChatOllama(
-    model="llama3.2-vision",
-    base_url=_ollama_host,
+ocr_model = ChatAnthropic(
+    model="claude-haiku-4-5-20251001",
     temperature=0,
     max_tokens=2000,
-    timeout=30,
 )
 
-model = ChatOllama(
-    model="llama3.2-vision",
-    base_url=_ollama_host,
+model = ChatAnthropic(
+    model="claude-haiku-4-5-20251001",
     temperature=0,
     max_tokens=1000,
-    timeout=30,
 ).with_structured_output(ParlayResult)
 
 system_prompt = """You are an agent that extracts data from UFC Parlay screenshots.

@@ -20,7 +20,7 @@ async function fetchPrediction(file: File): Promise<PredictionResult> {
   const formData = new FormData()
   formData.append('image', file)
 
-  const response = await fetch('/api/predict', {
+  const response = await fetch('https://ufc-parlay-predictor.onrender.com/predict', {
     method: 'POST',
     body: formData,
   })

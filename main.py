@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agent import encode_image, extract_parlay
 from predictions import get_fighters
 
-from langchain_ollama import ChatOllama
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 import os
 import tempfile
@@ -19,7 +19,7 @@ import math
 import numpy as np
 
 app = FastAPI()
-
+# NOTE - change to cloud based LLM in order to fix error
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://ufc-parlay-predictor.vercel.app", "http://localhost:5173"],
@@ -31,12 +31,10 @@ app.add_middleware(
 class modelReturn(BaseModel):
     model_name: List[Literal['ufc_outcome_model.pkl', 'ufc_round_prediction_model.pkl', 'ufc_WL_model.pkl']]
 
-model = ChatOllama(
-    model="qwen3",
-    base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+model = ChatAnthropic(
+    model="claude-haiku-4-5-20251001",
     temperature=0,
     max_tokens=1000,
-    timeout=30,
 ).with_structured_output(modelReturn)
 
 system_prompt = """ You are an agent tasked with deciding which machine learning model is best to use for each leg in a parlay.
