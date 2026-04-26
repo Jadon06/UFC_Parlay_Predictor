@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://ufc-parlay-predictor.onrender.com/$1"
+    }
+  ]
+}
