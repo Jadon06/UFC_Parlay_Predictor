@@ -81,6 +81,42 @@ class predictionsReturn(BaseModel):
     weakest_leg: ParlayLeg
     strongest_leg: ParlayLeg
 
+def classify_bet(bet: str):
+    text = bet.lower()
+    if any(k in text for k in [
+        "ko", "tko", "knockout", "technical knockout",
+        "submission", "sub", "tap", "tapout",
+        "choke", "rear naked", "rnc", "armbar", "triangle",
+        "guillotine", "kimura", "americana", "heel hook",
+        "kneebar", "darce", "d'arce", "anaconda", "calf slicer",
+        "neck crank", "technical submission", "tsub",
+        "decision", "dec", "unanimous", "split", "majority",
+        "finish", "stoppage", "disqualification", "dq",
+        "no contest", "nc", "doctor stoppage", "corner stoppage",
+        "method",
+    ]):
+        return "method"
+    if any(k in text for k in [
+        "round", "r1", "r2", "r3", "r4", "r5",
+        "1st round", "2nd round", "3rd round", "4th round", "5th round",
+        "first round", "second round", "third round", "fourth round", "fifth round",
+        "inside the distance", "itd",
+        "goes the distance", "gtd", "distance",
+        "over 1.5", "over 2.5", "over 3.5", "over 4.5",
+        "under 1.5", "under 2.5", "under 3.5", "under 4.5",
+        "ends in", "fight time", "total rounds",
+    ]):
+        return "round"
+    if any(k in text for k in [
+        "moneyline", "ml",
+        "to win", "to beat", "to defeat",
+        "wins", "beats", "defeats",
+        "winner", "victory",
+        "favorite", "underdog", "dog",
+        "straight up", "outright",
+    ]):
+        return "wl"
+
 @app.post("/predict", response_model=predictionsReturn)
 async def predict(image: UploadFile = File(...)):
     suffix = os.path.splitext(image.filename or "")[1] or ".jpg"
@@ -92,20 +128,33 @@ async def predict(image: UploadFile = File(...)):
     finally:
         os.unlink(tmp_path)
     fighters = get_fighters(extracted_parlay)
+    bet_types = [classify_bet(leg["bet"]) for leg in extracted_parlay]
 
     models = load_models()
-
-    # choose and load models
-    response = model.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content="Choose the predictive models based on the extracted parlay, models have been loaded as a list of tuples in this format (model, feature, le) 'le' only exists for ufc_outcome_model.pkl")
-    ])
-
-    to_predict = dict(zip(response, fighters))
+    outcomes_model = models[0][0]
+    outcomes_features = models[0][1]
+    le = models[0][2]
+    round_model = models[1][0]
+    round_features = models[1][1]
+    wl_model = models[2][0]
+    wl_features = models[2][1]
 
     probabilities = []
+    for i in range(len(bet_types)):
+        if bet_types[i] == "method":
+            new_fight = fighters[i][outcomes_features]
+            probs = outcomes_model.predict_proba(new_fight)[0]
+            result = dict(zip(le.classes_, probs))
+            probabilities.append(result[extracted_parlay[i]['method']])
+        if bet_types[i] == "round":
+            new_fight = fighters[i][round_features]
+            probs = round_model.predict_proba(new_fight)[extracted_parlay["round"]]
+            probabilities.append(probs)
+        if bet_types[i] == "wl":
+            new_fight = fighters[i][wl_features]
+            probs = wl_model.predict_proba(new_fight)[1]
+            probabilities.append(probs)
     
-
     legs_probs = dict(zip(probabilities, extracted_parlay))
     probability = math.prod(probabilities)
     weakest_leg = legs_probs[min(probabilities)]

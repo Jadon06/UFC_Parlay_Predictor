@@ -3,11 +3,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 import base64
 import os
 from pydantic import BaseModel
+from typing import Optional
 
 class ParlayLeg(BaseModel):
     fighter1: str
     fighter2: str
     bet: str
+    method: Optional[str] = None
+    round: Optional[int] = None
 
 class ParlayResult(BaseModel):
     legs: list[ParlayLeg]
@@ -42,7 +45,16 @@ In addition, here are the bet types, with definitions, use these to classify the
 - Goes The Distance (GTD): A bet that the fight will last the full scheduled duration.
 - Round Betting/Props: Specific props like "Fighter A to win in Round 2" or "Fight to end in Round 1".
 - Alternative Total Rounds/Spreads: Betting on different round totals than the main line, such as "Over 0.5 rounds" for a quick finish, or alternative fight lines.
-- Same-Game Parlay (SGP) Legs: Combining multiple wagers from a single fight, such as a fighter to win and the fight to go over 1.5 rounds. 
+- Same-Game Parlay (SGP) Legs: Combining multiple wagers from a single fight, such as a fighter to win and the fight to go over 1.5 rounds.
+
+The 'method' field is optional and should only be populated when the bet is a Method of Victory leg. Set it to exactly one of:
+- "KO/TKO" — if the bet specifies a knockout or technical knockout victory
+- "Submission" — if the bet specifies a submission victory
+- "Decision" — if the bet specifies a decision victory (unanimous, split, or majority)
+If the leg is not a Method of Victory bet, omit the 'method' field entirely (leave it null).
+
+The 'round' field is optional and should only be populated when the bet specifies a particular round the fight will end in. Set it to the round number as an integer (e.g., 1, 2, 3, 4, or 5).
+If the leg does not specify a particular round (e.g., it is an over/under, moneyline, goes-the-distance, or inside-the-distance bet), omit the 'round' field entirely (leave it null).
 
 Parlay screenshots can vary in layout, but a common pattern is:
 1. Large bold text: the selected fighter's name (fighter1) and odds
@@ -55,7 +67,11 @@ Example output format:
 {
   "legs": [
     {"fighter1": "Bryan Battle", "fighter2": "NA", "bet": "Moneyline"},
-    {"fighter1": "Marina Rodriguez", "fighter2": "Jessica Andrade", "bet": "Moneyline"}
+    {"fighter1": "Marina Rodriguez", "fighter2": "Jessica Andrade", "bet": "Method of Victory", "method": "KO/TKO"},
+    {"fighter1": "Israel Adesanya", "fighter2": "Sean Strickland", "bet": "Method of Victory", "method": "Decision"},
+    {"fighter1": "Charles Oliveira", "fighter2": "Dustin Poirier", "bet": "Method of Victory", "method": "Submission"},
+    {"fighter1": "Alex Pereira", "fighter2": "Jiri Prochazka", "bet": "Round Betting", "round": 2},
+    {"fighter1": "Sean O'Malley", "fighter2": "Merab Dvalishvili", "bet": "Round Betting", "method": "KO/TKO", "round": 1}
   ]
 }
 
