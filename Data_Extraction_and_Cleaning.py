@@ -226,8 +226,17 @@ class FighterInfo:
             f1_stats  = f1_future.result()
             f2_stats  = f2_future.result()
 
+        stat_keys = ["SLpM", "SApM", "TD_pct", "W_pct", "KO_pct", "Sub_pct", "Finish_pct", "ctrl", "ELO", "survivor_score"]
         row = {"Fighter": self.fighter1, "Opponent": self.fighter2}
-        row.update({f"f_{k}": v for k, v in f1_stats.items()})
-        row.update({f"o_{k}": v for k, v in f2_stats.items()})
+        row.update({f"f_{k}": f1_stats.get(k, 0) for k in stat_keys})
+        row.update({f"o_{k}": f2_stats.get(k, 0) for k in stat_keys})
 
-        return pd.DataFrame([row])
+        df = pd.DataFrame([row])
+        df["SLpM_diff"]  = df["f_SLpM"]       - df["o_SLpM"]
+        df["SApM_diff"]  = df["f_SApM"]       - df["o_SApM"]
+        df["TD_diff"]    = df["f_TD_pct"]     - df["o_TD_pct"]
+        df["KO_diff"]    = df["f_KO_pct"]     - df["o_KO_pct"]
+        df["Sub_diff"]   = df["f_Sub_pct"]    - df["o_Sub_pct"]
+        df["Fin_diff"]   = df["f_Finish_pct"] - df["o_Finish_pct"]
+        df["ELO_diff"]   = df["f_ELO"]        - df["o_ELO"]
+        return df

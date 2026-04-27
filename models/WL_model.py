@@ -58,7 +58,7 @@ def recompute_elo(data):
     data["o_ELO"] = o_elos
     return data
 
-print(data.tail())
+# print(data.tail())
 
 data = recompute_elo(data)
 data["SLpM_diff"] = data["f_SLpM"] - data["o_SLpM"]
@@ -73,7 +73,7 @@ split_date = "2021-01-01"
 train = data[data["Date"] <= split_date]
 test = data[data["Date"] > split_date]
 
-drop_cols = ["W/L", "winner", "Date", "Fighter", "Opponent", "method", "f_survivor_score", "o_survivor_score"]
+drop_cols = ["W/L", "winner", "Date", "Fighter", "Opponent", "method", "f_survivor_score", "o_survivor_score", "Round"]
 
 train = data[data["Date"] <= split_date]
 test = data[data["Date"] > split_date]
@@ -108,9 +108,9 @@ model.fit(X_train, y_train)
 probs = model.predict_proba(X_test)[:, 1]
 preds = model.predict(X_test)
 
-print("Accuracy:", accuracy_score(y_test, preds)) # Accuracy: 0.5805609915198956
-print("Log Loss:", log_loss(y_test, probs)) # Log Loss: 0.6857976220530534
-print("ROC AUC:", roc_auc_score(y_test, probs)) # ROC AUC: 0.612181718294672
+print("Accuracy:", accuracy_score(y_test, preds)) # Accuracy: 0.5645962732919255
+print("Log Loss:", log_loss(y_test, probs)) # Log Loss: 0.693584698410047
+print("ROC AUC:", roc_auc_score(y_test, probs)) # ROC AUC: 0.5896502504831242
 
 joblib.dump(model, "trained_models/ufc_WL_model.pkl")
 joblib.dump(X_train.columns.tolist(), "features/ufc_WL_features.pkl")

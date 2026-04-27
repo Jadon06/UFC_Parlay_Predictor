@@ -4,6 +4,11 @@ import base64
 import os
 from pydantic import BaseModel
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 class ParlayLeg(BaseModel):
     fighter1: str
@@ -19,12 +24,14 @@ ocr_model = ChatAnthropic(
     model="claude-haiku-4-5-20251001",
     temperature=0,
     max_tokens=2000,
+    api_key=ANTHROPIC_API_KEY
 )
 
 model = ChatAnthropic(
     model="claude-haiku-4-5-20251001",
     temperature=0,
     max_tokens=1000,
+    api_key=ANTHROPIC_API_KEY
 ).with_structured_output(ParlayResult)
 
 system_prompt = """You are an agent that extracts data from UFC Parlay screenshots.

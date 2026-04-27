@@ -14,9 +14,11 @@ import joblib
 from Data_Extraction_and_Cleaning import FighterInfo
 
 from pydantic import BaseModel
-from typing import Literal, List
+from typing import Literal, List, Dict
 import math
 import numpy as np
+
+from Data_Extraction_and_Cleaning import FighterInfo
 
 app = FastAPI()
 # NOTE - change to cloud based LLM in order to fix error
@@ -51,19 +53,23 @@ system_prompt = """ You are an agent tasked with deciding which machine learning
 
 def load_models():
     features = {
-        "ufc_outcome_model.pkl" : "ufc_outcome_features.pkl",
-        "ufc_round_prediction_model.pkl" : "ufc_round_predictions_features.pkl",
-        "ufc_WL_model.pkl" : "ufc_WL_features.pkl"
+        "trained_models/ufc_outcome_model.pkl" : "features/ufc_outcomes_features.pkl",
+        "trained_models/ufc_round_prediction_model.pkl" : "features/ufc_round_prediction_features.pkl",
+        "trained_models/ufc_WL_model.pkl" : "features/ufc_WL_features.pkl"
     }
-    model = joblib.load(model)
-    features = joblib.load(features[model])
+    # model = joblib.load(model)
+    # features = joblib.load(features[model])
 
-    models = []
-    for model, feature in features:
-        models.append((model, feature))
-        if model == "ufc_outcome_model.pkl":
+    models = {}
+    for model, feature in features.items():
+        loaded_model, loaded_feature = joblib.load(model), joblib.load(feature)
+        if model == "trained_models/ufc_round_prediction_model.pkl" :
+            models["round"] = {"model" : loaded_model, "features" : loaded_feature}
+        if model == "trained_models/ufc_WL_model.pkl":
+            models["WL"] = {"model" : loaded_model, "features" : loaded_feature}
+        if model == "trained_models/ufc_outcome_model.pkl":
             le = joblib.load("label_encoder.pkl")
-            models.append((model, feature, le))
+            models["outcome"] = {"model" : loaded_model, "features" : loaded_feature, "le" : le}
     return models
 
 """
@@ -78,6 +84,7 @@ class predictionsReturn(BaseModel):
     probability: float
     weakest_leg: ParlayLeg
     strongest_leg: ParlayLeg
+    leg_probs: Dict[float, ParlayLeg]
 
 def classify_bet(bet: str):
     text = bet.lower()
@@ -128,34 +135,38 @@ async def predict(image: UploadFile = File(...)):
     finally:
         os.unlink(tmp_path)
     fighters = get_fighters(extracted_parlay)
-    bet_types = [classify_bet(leg["bet"]) for leg in extracted_parlay]
+    fighters_info = [FighterInfo(fighters[i][0], fighters[i][1]).get_prediction_row() for i in range(len(fighters))]
+    print(fighters_info)
+    bet_types = [classify_bet(leg.bet) for leg in extracted_parlay.legs]
 
     models = load_models()
-    outcomes_model = models[0][0]
-    outcomes_features = models[0][1]
-    le = models[0][2]
-    round_model = models[1][0]
-    round_features = models[1][1]
-    wl_model = models[2][0]
-    wl_features = models[2][1]
+    outcomes_model = models["outcome"]["model"]
+    outcomes_features = models["outcome"]["features"]
+    le = models["outcome"]["le"]
+    round_model = models["round"]["model"]
+    round_features = models["round"]["features"]
+    wl_model = models["WL"]["model"]
+    wl_features = models["WL"]["features"]
 
     probabilities = []
+    
     for i in range(len(bet_types)):
         if bet_types[i] == "method":
-            new_fight = fighters[i][outcomes_features]
+            new_fight = fighters_info[i][outcomes_features]
             probs = outcomes_model.predict_proba(new_fight)[0]
             result = dict(zip(le.classes_, probs))
-            probabilities.append(result[extracted_parlay[i]['method']])
+            probabilities.append(float(result[extracted_parlay[i]['method']]))
         if bet_types[i] == "round":
-            new_fight = fighters[i][round_features]
+            new_fight = fighters_info[i][round_features]
             probs = round_model.predict_proba(new_fight)[extracted_parlay["round"]]
-            probabilities.append(probs)
+            probabilities.append(float(probs))
         if bet_types[i] == "wl":
-            new_fight = fighters[i][wl_features]
-            probs = wl_model.predict_proba(new_fight)[1]
-            probabilities.append(probs)
-    
-    legs_probs = dict(zip(probabilities, extracted_parlay))
+            new_fight = fighters_info[i][wl_features]
+            probs = wl_model.predict_proba(new_fight)[0][1]
+            probabilities.append(float(probs))
+
+    print(probabilities)
+    legs_probs = dict(zip(probabilities, extracted_parlay.legs))
     probability = math.prod(probabilities)
     weakest_leg = legs_probs[min(probabilities)]
     strongest_leg = legs_probs[max(probabilities)]
@@ -165,5 +176,6 @@ async def predict(image: UploadFile = File(...)):
     # prob = model.predict_proba(new_fight)[0][1]
 
     # print(prob)
-    return {"probability": probability, "weakest_leg": weakest_leg, "strongest_leg": strongest_leg}
+    print(legs_probs)
+    return {"probability": probability, "weakest_leg": weakest_leg, "strongest_leg": strongest_leg, "leg_probs": legs_probs}
 

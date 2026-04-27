@@ -8,12 +8,15 @@ type ParlayLeg = {
   fighter1: string
   fighter2: string
   bet: string
+  method?: string | null
+  round?: number | null
 }
+
+type LegProb = [number, ParlayLeg]
 
 type PredictionResult = {
   probability: number
-  weakest_leg: ParlayLeg
-  strongest_leg: ParlayLeg
+  leg_probs: LegProb[]
 }
 
 async function fetchPrediction(file: File): Promise<PredictionResult> {
@@ -306,29 +309,36 @@ export default function App() {
                 </div>
 
                 {/* Leg breakdown */}
-                <div style={{ marginTop: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', textAlign: 'left' }}>
-                  {([
-                    { label: 'Strongest Leg', leg: result.strongest_leg, accent: '#22c55e' },
-                    { label: 'Weakest Leg',   leg: result.weakest_leg,   accent: '#d20a0a' },
-                  ] as const).map(({ label, leg, accent }) => (
-                    <div key={label} style={{
-                      borderRadius: '10px',
-                      border: `1px solid ${accent}44`,
-                      backgroundColor: `${accent}0d`,
-                      padding: '12px',
-                    }}>
-                      <p style={{ color: accent, fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', margin: '0 0 8px', fontWeight: 700 }}>{label}</p>
-                      <p style={{ color: '#111111', fontSize: '13px', fontWeight: 700, margin: '0 0 2px', lineHeight: 1.3 }}>{leg.fighter1}</p>
-                      {leg.fighter2 && leg.fighter2 !== 'NA' && (
-                        <p style={{ color: '#555555', fontSize: '11px', margin: '0 0 8px' }}>vs {leg.fighter2}</p>
-                      )}
-                      <span style={{
-                        display: 'inline-block', marginTop: leg.fighter2 && leg.fighter2 !== 'NA' ? 0 : '8px',
-                        padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600,
-                        color: accent, border: `1px solid ${accent}44`, backgroundColor: `${accent}11`,
-                      }}>{leg.bet}</span>
-                    </div>
-                  ))}
+                <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '10px', textAlign: 'left' }}>
+                  {result.leg_probs.map(([prob, leg], idx) => {
+                    const accent = getProbabilityColor(prob)
+                    return (
+                      <div key={idx} style={{
+                        borderRadius: '10px',
+                        border: `1px solid ${accent}44`,
+                        backgroundColor: `${accent}0d`,
+                        padding: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}>
+                        <div>
+                          <p style={{ color: '#111111', fontSize: '13px', fontWeight: 700, margin: '0 0 2px', lineHeight: 1.3 }}>{leg.fighter1}</p>
+                          {leg.fighter2 && leg.fighter2 !== 'NA' && (
+                            <p style={{ color: '#555555', fontSize: '11px', margin: '0 0 6px' }}>vs {leg.fighter2}</p>
+                          )}
+                          <span style={{
+                            display: 'inline-block', marginTop: leg.fighter2 && leg.fighter2 !== 'NA' ? 0 : '6px',
+                            padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 600,
+                            color: accent, border: `1px solid ${accent}44`, backgroundColor: `${accent}11`,
+                          }}>{leg.bet}{leg.method ? ` · ${leg.method}` : ''}{leg.round ? ` · R${leg.round}` : ''}</span>
+                        </div>
+                        <span style={{ fontSize: '18px', fontWeight: 900, color: accent, marginLeft: '12px', whiteSpace: 'nowrap' }}>
+                          {Math.round(prob * 100)}%
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
 
                 <button
