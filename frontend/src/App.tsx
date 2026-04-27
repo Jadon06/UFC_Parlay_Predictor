@@ -33,7 +33,7 @@ async function fetchPrediction(file: File): Promise<PredictionResult> {
   return data as PredictionResult
 }
 
-function getProbabilityColor(prob: number): string {
+function getLegColor(prob: number): string {
   if (prob > 0.4)  return '#22c55e'
   if (prob >= 0.1) return '#c9a84c'
   return '#d20a0a'
@@ -293,7 +293,7 @@ export default function App() {
                 <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '10px', textAlign: 'left' }}>
                   {Object.entries(result.leg_probs).map(([probStr, leg], idx) => {
                     const prob = parseFloat(probStr)
-                    const accent = getProbabilityColor(prob)
+                    const accent = getLegColor(prob)
                     return (
                       <div key={idx} style={{
                         borderRadius: '10px',
