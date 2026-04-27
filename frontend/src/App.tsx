@@ -12,11 +12,9 @@ type ParlayLeg = {
   round?: number | null
 }
 
-type LegProb = [number, ParlayLeg]
-
 type PredictionResult = {
   probability: number
-  leg_probs: LegProb[]
+  leg_probs: Record<string, ParlayLeg>
 }
 
 async function fetchPrediction(file: File): Promise<PredictionResult> {
@@ -312,7 +310,8 @@ export default function App() {
 
                 {/* Leg breakdown */}
                 <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '10px', textAlign: 'left' }}>
-                  {result.leg_probs.map(([prob, leg], idx) => {
+                  {Object.entries(result.leg_probs).map(([probStr, leg], idx) => {
+                    const prob = parseFloat(probStr)
                     const accent = getProbabilityColor(prob)
                     return (
                       <div key={idx} style={{
