@@ -30,7 +30,9 @@ async function fetchPrediction(file: File): Promise<PredictionResult> {
 
   if (!response.ok) throw new Error(`Server error: ${response.status}`)
 
-  return response.json() as Promise<PredictionResult>
+  const data = await response.json()
+  console.log('API response:', data)
+  return data as PredictionResult
 }
 
 function getProbabilityColor(prob: number): string {
