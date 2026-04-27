@@ -34,8 +34,8 @@ async function fetchPrediction(file: File): Promise<PredictionResult> {
 }
 
 function getProbabilityColor(prob: number): string {
-  if (prob >= 0.7) return '#22c55e'
-  if (prob >= 0.5) return '#c9a84c'
+  if (prob > 0.4)  return '#22c55e'
+  if (prob >= 0.1) return '#c9a84c'
   return '#d20a0a'
 }
 
@@ -275,11 +275,6 @@ export default function App() {
 
           {state === 'result' && result !== null && (
             <div style={{ borderRadius: '16px', border: '1px solid #333333', backgroundColor: '#1e1e1e', overflow: 'hidden' }}>
-              {preview && (
-                <div style={{ position: 'relative', height: '100px', overflow: 'hidden' }}>
-                  <img src={preview} alt="parlay" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.15 }} />
-                </div>
-              )}
               <div className="result-padding" style={{ textAlign: 'center' }}>
                 {/* Verdict */}
                 {(() => {
